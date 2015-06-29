@@ -72,23 +72,6 @@ public class MetadataDublinCoreRecord implements MetadataRecord {
 		return result;
 	}
 
-	/* <MJ.> -- method removed from supertype
-	@Override
-	public String getFormat() {
-		List<String> type = dcRecord.getTypes();
-		for (String f : type) {
-			//Kramerius specific
-			if (f.equals("model:monograph")) {
-				return "Book";
-			//Kramerius specific
-			} else if (f.equals("model:periodical")) {
-				return "Journal";
-			}
-		}
-		return null;
-	}
-*/
-
 	@Override
 	public Long getPublicationYear() {
 		// expecting year in date (should work for Kramerius)
