@@ -90,12 +90,6 @@ public class MetadataDublinCoreRecord implements MetadataRecord {
 	}
 
 	@Override
-	public String export(IOFormat iOFormat) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
-	@Override
 	public String getUniqueId() {
 		// expecting unique id in first identifier
 		return this.dcRecord.getFirstIdentifier();
@@ -178,7 +172,7 @@ public class MetadataDublinCoreRecord implements MetadataRecord {
 
 	@Override
 	public String getISSNSeries() {
-		// TODO Auto-generated method stub
+		// TODO 
 		return null;
 	}
 
@@ -292,4 +286,10 @@ public class MetadataDublinCoreRecord implements MetadataRecord {
 		return null;
 	}
 
+	@Override
+	public String export(IOFormat iOFormat) {
+		// TODO <MJ.> How should export work? Should there be implementation of DC export?
+		return null;
+	}
+	
 }

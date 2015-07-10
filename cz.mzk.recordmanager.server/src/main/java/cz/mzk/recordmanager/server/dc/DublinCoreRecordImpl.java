@@ -178,7 +178,7 @@ public class DublinCoreRecordImpl implements DublinCoreRecord {
 	
 	@Override
 	public void addCreator(String c) {
-		this.creator = getTitles();
+		this.creator = getCreators();
 		creator.add(c);
 	}
 
@@ -232,7 +232,7 @@ public class DublinCoreRecordImpl implements DublinCoreRecord {
 	}
 	
 	@Override
-	public void addSources(String s) {
+	public void addSource(String s) {
 		this.source = getSources();
 		source.add(s);
 	}

@@ -14,11 +14,21 @@ public class DublinCoreXMLHandler extends DefaultHandler {
 	private DublinCoreRecord dcRecord;
 //	private Stack<String> elementStack = new Stack<String>();
 	
-	private static final String DC_TITLE="dc:title";
+	private static final String DC_CONTRIBUTOR="dc:contributor";
+	private static final String DC_COVERAGE="dc:coverage";
 	private static final String DC_CREATOR="dc:creator";
-	private static final String DC_IDENTIFIER="dc:identifier";
-	private static final String DC_TYPE="dc:type";
 	private static final String DC_DATE="dc:date";
+	private static final String DC_DESCRIPTION="dc:description";
+	private static final String DC_FORMAT="dc:format";
+	private static final String DC_IDENTIFIER="dc:identifier";
+	private static final String DC_LANGUAGE="dc:language";
+	private static final String DC_PUBLISHER="dc:publisher";
+	private static final String DC_RELATION="dc:relation";
+	private static final String DC_RIGHTS="dc:rights";
+	private static final String DC_SOURCE="dc:source";
+	private static final String DC_SUBJECT="dc:subject";
+	private static final String DC_TITLE="dc:title";
+	private static final String DC_TYPE="dc:type";
 	
 
 	public void startElement(String uri, String localName, String qName,
@@ -42,20 +52,51 @@ public class DublinCoreXMLHandler extends DefaultHandler {
 			StringEscapeUtils.unescapeXml(s);
 			
 			switch (qName) {
-			case DC_TITLE: 			
-				this.dcRecord.addTitle(s);
+			case DC_CONTRIBUTOR:
+				this.dcRecord.addContributor(s);
+				break;
+			case DC_COVERAGE:
+				this.dcRecord.addCoverage(s);
 				break;
 			case DC_CREATOR:
 				this.dcRecord.addCreator(s);
+				break;	
+			case DC_DATE:
+				this.dcRecord.addDate(s);
+				break;
+			case DC_DESCRIPTION:
+				this.dcRecord.addDescription(s);
+				break;
+			case DC_FORMAT:
+				this.dcRecord.addFormat(s);
 				break;
 			case DC_IDENTIFIER: 
 				this.dcRecord.addIdentifier(s);
 				break;
+			case DC_LANGUAGE:
+				this.dcRecord.addLanguage(s);
+				break;
+			case DC_PUBLISHER:
+				this.dcRecord.addPublisher(s);
+				break;
+			case DC_RELATION:
+				this.dcRecord.addRelation(s);
+				break;
+			case DC_RIGHTS:
+				this.dcRecord.addRights(s);
+				break;
+			case DC_SOURCE:
+				this.dcRecord.addSource(s);
+				break;
+			case DC_SUBJECT:
+				this.dcRecord.addSubjects(s);
+				break;
+			case DC_TITLE: 			
+				this.dcRecord.addTitle(s);
+				break;
 			case DC_TYPE:
 				this.dcRecord.addType(s);
 				break;
-			case DC_DATE:
-				this.dcRecord.addDate(s);
 			}
 		}
 		// Remove last added element

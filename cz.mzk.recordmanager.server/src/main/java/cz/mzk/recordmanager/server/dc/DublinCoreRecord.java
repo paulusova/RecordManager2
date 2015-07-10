@@ -109,7 +109,7 @@ public interface DublinCoreRecord {
 	public void addRights(String s);
 	
 	/* adds to sources list */
-	public void addSources(String s);
+	public void addSource(String s);
 	
 	/* adds to subjects list */
 	public void addSubjects(String s);
