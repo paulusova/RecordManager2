@@ -5,18 +5,19 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.batch.runtime.BatchStatus;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameter;
+import org.springframework.batch.core.JobParameter.ParameterType;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersIncrementer;
 import org.springframework.batch.core.JobParametersInvalidException;
 import org.springframework.batch.core.JobParametersValidator;
-import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.configuration.JobRegistry;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
@@ -26,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import cz.mzk.recordmanager.server.model.OAIGranularity;
+import cz.mzk.recordmanager.server.util.Constants;
 
 @Component
 public class JobExecutorImpl implements JobExecutor {
@@ -49,7 +51,7 @@ public class JobExecutorImpl implements JobExecutor {
 	public Collection<String> getJobNames() {
 		return jobRegistry.getJobNames();
 	}
-
+	
 	@Override
 	public Collection<JobParameterDeclaration> getParametersOfJob(String jobName) {
 		try {
@@ -70,18 +72,30 @@ public class JobExecutorImpl implements JobExecutor {
 
 	@Override
 	public Long execute(String jobName, JobParameters params) {
+		return execute(jobName, params, false);
+	}
+
+	@Override
+	public Long execute(String jobName, JobParameters params, boolean forceRestart) {
 		try {
 			final Job job = jobRegistry.getJob(jobName);
 			JobParameters transformedParams = transformJobParameters(params,
 					job.getJobParametersValidator());
+			
 			JobParametersIncrementer incrementer = job
 					.getJobParametersIncrementer();
 			if (incrementer != null) {
 				params = incrementer.getNext(transformedParams);
 			}
 			job.getJobParametersValidator().validate(transformedParams);
-			JobExecution exec = jobLauncher.run(job, transformedParams);
-			return exec.getId();
+			JobExecution lastExec = jobRepository.getLastJobExecution(jobName, transformedParams);
+			if (forceRestart && lastExec != null && !lastExec.getStatus().equals(BatchStatus.COMPLETED)) {
+				restart(lastExec.getId());
+				return lastExec.getJobId();
+			} else {
+				JobExecution exec = jobLauncher.run(job, transformedParams);
+				return exec.getId();
+			}
 		} catch (Exception ex) {
 			throw new RuntimeException(String.format(
 					"Job %s with parameters %s could not be started.", jobName,
@@ -129,6 +143,11 @@ public class JobExecutorImpl implements JobExecutor {
 		Map<String, JobParameterDeclaration> paramDeclMap = new HashMap<String, JobParameterDeclaration>();
 		for (JobParameterDeclaration declaration: insValidator.getParameters()) {
 			paramDeclMap.put(declaration.getName(), declaration);
+		}
+		
+		//No need for declare 'repeat' parameter in job validator
+		if (paramDeclMap.get(Constants.JOB_PARAM_REPEAT) == null) {
+			paramDeclMap.put(Constants.JOB_PARAM_REPEAT, new JobParameterDeclaration(Constants.JOB_PARAM_REPEAT, ParameterType.LONG, false));
 		}
 		
 		for (String key : inParamMap.keySet()) {
@@ -191,6 +210,13 @@ public class JobExecutorImpl implements JobExecutor {
 				break;
 			}
 		}
+		
+		JobParameter repeatParam = transformedMap.get(Constants.JOB_PARAM_REPEAT);
+		if (repeatParam != null && (new Long(1)).equals(repeatParam.getValue())) {
+			transformedMap.put(Constants.JOB_PARAM_TIMESTAMP, new JobParameter(new Date()));
+		}
+		transformedMap.remove(Constants.JOB_PARAM_REPEAT);
+		
 		return new JobParameters(transformedMap);
 	}
 

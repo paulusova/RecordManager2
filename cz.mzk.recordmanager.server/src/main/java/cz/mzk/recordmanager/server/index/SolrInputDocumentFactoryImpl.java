@@ -1,5 +1,6 @@
 package cz.mzk.recordmanager.server.index;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -8,6 +9,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.solr.common.SolrInputDocument;
 import org.slf4j.Logger;
@@ -16,12 +18,17 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import cz.mzk.recordmanager.server.index.enrich.DedupRecordEnricher;
 import cz.mzk.recordmanager.server.model.DedupRecord;
 import cz.mzk.recordmanager.server.model.HarvestedRecord;
 import cz.mzk.recordmanager.server.model.ImportConfiguration;
+import cz.mzk.recordmanager.server.scripting.MappingResolver;
+import cz.mzk.recordmanager.server.util.SolrUtils;
 
 @Component
 public class SolrInputDocumentFactoryImpl implements SolrInputDocumentFactory, InitializingBean {
+
+	private static final String MZK_INSTITUTION_MAP = "mzk_institution.map";
 
 	private static Logger logger = LoggerFactory.getLogger(SolrInputDocumentFactoryImpl.class);
 	
@@ -49,6 +56,12 @@ public class SolrInputDocumentFactoryImpl implements SolrInputDocumentFactory, I
 		
 	@Autowired
 	private DelegatingSolrRecordMapper mapper;
+	
+	@Autowired
+	private MappingResolver propertyResolver;
+	
+	@Autowired
+	private List<DedupRecordEnricher> dedupRecordEnrichers;
 
 	@Override
 	public SolrInputDocument create(HarvestedRecord record) {
@@ -68,25 +81,31 @@ public class SolrInputDocumentFactoryImpl implements SolrInputDocumentFactory, I
 		}
 	}
 
-	public SolrInputDocument create(DedupRecord dedupRecord, List<HarvestedRecord> records) {
+	public List<SolrInputDocument> create(DedupRecord dedupRecord, List<HarvestedRecord> records) {
 		if (records.isEmpty()) {
 			return null;
 		}
+		
+		List<SolrInputDocument> documentList = records.stream().map(rec -> create(rec)).collect(Collectors.toCollection(ArrayList::new));
+		
 		HarvestedRecord record = records.get(0);
-		SolrInputDocument document = parse(record);
-		document.addField(SolrFieldConstants.ID_FIELD, dedupRecord.getId());
-		document.addField(SolrFieldConstants.INSTITUTION_FIELD, getInstitution(record));
-		document.addField(SolrFieldConstants.MERGED_FIELD, 1);
-		document.addField(SolrFieldConstants.WEIGHT, records.get(0).getWeight());
-		List<String> localIds = new ArrayList<String>();
-		for (HarvestedRecord rec : records) {
-			localIds.add(getId(rec));
-		}
-		document.addField(SolrFieldConstants.LOCAL_IDS_FIELD, localIds);
+		SolrInputDocument mergedDocument = parse(record);
+		mergedDocument.addField(SolrFieldConstants.ID_FIELD, dedupRecord.getId());
+		mergedDocument.addField(SolrFieldConstants.INSTITUTION_FIELD, getInstitution(record));
+		mergedDocument.addField(SolrFieldConstants.MERGED_FIELD, 1);
+		mergedDocument.addField(SolrFieldConstants.WEIGHT, record.getWeight());
+		mergedDocument.addField(SolrFieldConstants.CITY_INSTITUTION_CS, getCityInstitutionForSearching(record));
+		
+		List<String> localIds = records.stream().map(rec -> getId(record)).collect(Collectors.toCollection(ArrayList::new));
+		mergedDocument.addField(SolrFieldConstants.LOCAL_IDS_FIELD, localIds);
+		
+		dedupRecordEnrichers.forEach(enricher -> enricher.enrich(dedupRecord, mergedDocument, documentList));
+		documentList.add(mergedDocument);
+
 		if (logger.isTraceEnabled()) {
 			logger.info("Mapping of dedupRecord with id = {} finished", dedupRecord.getId());
 		}
-		return document;
+		return documentList;
 	}
 
 	protected SolrInputDocument parse(HarvestedRecord record) {
@@ -96,6 +115,18 @@ public class SolrInputDocumentFactoryImpl implements SolrInputDocumentFactory, I
 			String fName = remappedFields.getOrDefault(field.getKey(),
 					field.getKey());
 			Object fValue = field.getValue();
+			String id = getId(record);
+			if (fName.equals(SolrFieldConstants.HOLDINGS_996_FIELD)) {
+				//add ids to holdings_996_field
+				
+				@SuppressWarnings("unchecked")
+				List<String> holdings = (List<String>) fValue;
+				List<String> updatedHoldings = new ArrayList<>();
+				for (String oldHolding: holdings) {
+					updatedHoldings.add(oldHolding + "$z" + id);
+				}
+				fValue = updatedHoldings;
+			}
 			document.addField(fName, fValue);
 		}
 		return document;
@@ -133,12 +164,20 @@ public class SolrInputDocumentFactoryImpl implements SolrInputDocumentFactory, I
 	}
 	
 	protected List<String> getInstitution(HarvestedRecord record){
-		List<String> result = new ArrayList<String>();
 		String city = getCityOfRecord(record);
 		String name = getInstitutionOfRecord(record);
-		result.add("0/"+city+"/");
-		result.add("1/"+city+"/"+name+"/");
+		return SolrUtils.createHierarchicFacetValues(city, name);
+	}
 
+	protected List<String> getCityInstitutionForSearching(HarvestedRecord hr){
+		List<String> result = new ArrayList<String>();
+		result.add(getCityOfRecord(hr));
+		try {
+			result.add(propertyResolver.resolve(MZK_INSTITUTION_MAP).get(getInstitutionOfRecord(hr)));
+		} catch (IOException ioe){
+			throw new IllegalArgumentException(
+					String.format("Mapping for %s can't be open", MZK_INSTITUTION_MAP));
+		}
 		return result;
 	}
 

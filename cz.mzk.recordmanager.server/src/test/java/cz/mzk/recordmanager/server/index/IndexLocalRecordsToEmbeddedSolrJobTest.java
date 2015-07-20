@@ -26,6 +26,7 @@ import org.testng.annotations.Test;
 
 import cz.mzk.recordmanager.server.AbstractTest;
 import cz.mzk.recordmanager.server.DBUnitHelper;
+import cz.mzk.recordmanager.server.solr.SolrServerFactory;
 import cz.mzk.recordmanager.server.util.Constants;
 
 public class IndexLocalRecordsToEmbeddedSolrJobTest extends AbstractTest {
@@ -46,7 +47,6 @@ public class IndexLocalRecordsToEmbeddedSolrJobTest extends AbstractTest {
 
 	@BeforeMethod
 	public void before() throws Exception {
-		System.out.println("init");
 		dbUnitHelper.init("dbunit/IndexRecordsToSolrJobTest.xml");
 	}
 	

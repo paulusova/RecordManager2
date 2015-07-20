@@ -1,6 +1,8 @@
 package cz.mzk.recordmanager.server.index;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Future;
 
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.response.UpdateResponse;
@@ -13,7 +15,9 @@ import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.beans.factory.annotation.Autowired;
 
-public class SolrIndexWriter implements ItemWriter<SolrInputDocument>, StepExecutionListener {
+import cz.mzk.recordmanager.server.solr.SolrServerFactory;
+
+public class SolrIndexWriter implements ItemWriter<Future<List<SolrInputDocument>>>, StepExecutionListener {
 
 	private static Logger logger = LoggerFactory.getLogger(SolrRecordProcessor.class);
 
@@ -30,12 +34,23 @@ public class SolrIndexWriter implements ItemWriter<SolrInputDocument>, StepExecu
 		this.solrUrl = solrUrl;
 	}
 
-	@SuppressWarnings("unchecked")
 	@Override
-	public void write(List<? extends SolrInputDocument> documents) throws Exception {
-		logger.info("About to index {} documents to Solr", documents.size());
-		UpdateResponse response = server.add((List<SolrInputDocument>) documents, commitWithinMs);
-		logger.info("Indexing of {} documents to Solr finished", documents.size());
+	public void write(List<? extends Future<List<SolrInputDocument>>> items)
+			throws Exception {
+		try {
+			List<SolrInputDocument> documents = new ArrayList<SolrInputDocument>();
+			for (Future<List<SolrInputDocument>> item : items) {
+				List<SolrInputDocument> docs = item.get();
+				if (docs != null) {
+					documents.addAll(docs);
+				}
+			}
+			logger.info("About to index {} documents to Solr", documents.size());
+			UpdateResponse response = server.add(documents, commitWithinMs);
+			logger.info("Indexing of {} documents to Solr finished", documents.size());
+		} catch (Exception ex) {
+			logger.error("Exception thrown when indexing documents to Solr", ex);
+		}
 	}
 
 	public int getCommitWithinMs() {

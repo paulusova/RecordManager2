@@ -164,3 +164,40 @@ ALTER TABLE oai_harvest_conf DROP COLUMN id;
 ALTER TABLE oai_harvest_conf DROP COLUMN contact_person_id;
 ALTER TABLE oai_harvest_conf DROP COLUMN base_weight;
 ALTER TABLE oai_harvest_conf DROP COLUMN cluster_id_enabled;
+
+-- 7. 7. 2015 - xrosecky
+CREATE TABLE download_import_conf (
+  import_conf_id       DECIMAL(10)  PRIMARY KEY,
+  url                  VARCHAR(128),
+  CONSTRAINT download_conf_import_conf_fk FOREIGN KEY (import_conf_id) REFERENCES import_conf(id)
+);
+
+CREATE TABLE antikvariaty (
+  id                   DECIMAL(10) PRIMARY KEY,
+  updated              TIMESTAMP,
+  url                  VARCHAR(500),
+  title                VARCHAR(255),
+  pub_year             DECIMAL(5)
+);
+
+CREATE TABLE antikvariaty_catids (
+  id_from_catalogue   VARCHAR(100),
+  antikvariaty_id     DECIMAL(10),
+  CONSTRAINT antikvariaty_catids_pk PRIMARY KEY (id_from_catalogue, antikvariaty_id),
+  CONSTRAINT antikvariaty_catids_fk FOREIGN KEY (antikvariaty_id) REFERENCES antikvariaty(id)
+);
+
+-- 17. 7. 2015 - xrosecky
+CREATE INDEX harvested_record_dedup_record_id_updated_idx ON harvested_record(dedup_record_id, updated);
+DROP INDEX harvested_record_dedup_record_idx;
+
+CREATE VIEW dedup_record_last_update AS
+SELECT
+  dr.id dedup_record_id,
+  MAX(CASE WHEN dr.updated > hr.updated THEN dr.updated ELSE hr.updated END) last_update
+FROM
+  dedup_record dr JOIN 
+  harvested_record hr ON hr.dedup_record_id = dr.id 
+GROUP BY
+  dr.id
+;

@@ -1,6 +1,5 @@
 package cz.mzk.recordmanager.server.scripting.marc;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -17,33 +16,30 @@ import org.marc4j.marc.Subfield;
 import cz.mzk.recordmanager.server.export.IOFormat;
 import cz.mzk.recordmanager.server.marc.MarcRecord;
 import cz.mzk.recordmanager.server.metadata.MetadataMarcRecord;
-import cz.mzk.recordmanager.server.metadata.MetadataRecord;
 import cz.mzk.recordmanager.server.model.HarvestedRecordFormat.HarvestedRecordFormatEnum;
-import cz.mzk.recordmanager.server.scripting.Mapping;
+import cz.mzk.recordmanager.server.scripting.BaseDSL;
 import cz.mzk.recordmanager.server.scripting.MappingResolver;
 import cz.mzk.recordmanager.server.scripting.function.RecordFunction;
+import cz.mzk.recordmanager.server.util.SolrUtils;
 
-public class MarcDSL {
-	
+public class MarcDSL extends BaseDSL {
+
 	private MetadataMarcRecord marcMetadataRecord;
-	
+
 	private final static String EMPTY_SEPARATOR = "";
-	
+
 	private final static Pattern FIELD_PATTERN = Pattern
 			.compile("([0-9]{3})([a-zA-Z0-9]*)");
-	
+
 	private static final Pattern RECORDTYPE_PATTERN = Pattern.compile("^(AUDIO|VIDEO|OTHER)_(.*)$");
 
 	private final MarcRecord record;
 
-	private final MappingResolver propertyResolver;
-	
 	private final Map<String, RecordFunction<MarcRecord>> functions;
 
 	public MarcDSL(MarcRecord record, MappingResolver propertyResolver, Map<String, RecordFunction<MarcRecord>> functions) {
-		super();
+		super(propertyResolver);
 		this.record = record;
-		this.propertyResolver = propertyResolver;
 		this.functions = functions;
 		this.marcMetadataRecord = new MetadataMarcRecord(record);
 	}
@@ -95,32 +91,6 @@ public class MarcDSL {
 		if(s != null) return getFirstField("044a").trim();
 		
 		return "";
-	}
-
-	public String translate(String file, String input, String defaultValue)
-			throws IOException {
-		Mapping mapping = propertyResolver.resolve(file);
-		String result = (String) mapping.get(input);
-		if (result == null) {
-			result = defaultValue;
-		}
-		return result;
-	}
-
-	public List<String> translate(String file, List<String> inputs,
-			String defaultValue) throws IOException {
-		List<String> translated = new ArrayList<String>();
-		Mapping mapping = propertyResolver.resolve(file);
-		for (String input : inputs) {
-			String result = (String) mapping.get(input);
-			if (result == null) {
-				result = defaultValue;
-			}
-			if (result != null) {
-				translated.add(result);
-			}
-		}
-		return translated;
 	}
 
     /*
@@ -197,17 +167,15 @@ public class MarcDSL {
 		return marcMetadataRecord.export(IOFormat.ISO_2709);
 	}
 	
-	public List<String> getRecordType(){
+	public List<String> getRecordType() {
 		List<String> result = new ArrayList<String>();
-		
-		for(HarvestedRecordFormatEnum format: marcMetadataRecord.getDetectedFormatList()){
+		for (HarvestedRecordFormatEnum format: marcMetadataRecord.getDetectedFormatList()) {
 			Matcher matcher = RECORDTYPE_PATTERN.matcher(format.name());
-			if(matcher.matches()){
-				result.add("0/"+matcher.group(1)+"/");
-				result.add("1/"+matcher.group(1)+"/"+matcher.group(2)+"/");
+			if (matcher.matches()) {
+				result.addAll(SolrUtils.createHierarchicFacetValues(matcher.group(1), matcher.group(2)));
 			}
 			else {
-				result.add("0/"+format+"/");
+				result.addAll(SolrUtils.createHierarchicFacetValues(format.name()));
 			}
 		}
 		return result;
@@ -256,9 +224,7 @@ public class MarcDSL {
     
     public Set<String> getFieldsUnique(String tags){
     	Set<String> result = new HashSet<String>();
-    	for(String data: getFields(tags)){
-    		result.add(data);
-    	}
+    	result.addAll(getFields(tags));
     	return result;
     }
  
@@ -300,6 +266,30 @@ public class MarcDSL {
     		}
     	}
     	
+    	return result;
+    }
+    
+    public List<String> getHoldings996() {
+    	List<String> result = new ArrayList<>();
+    	Map<String, List<DataField>> allFields = record.getAllFields();
+    	
+    	List<DataField> list996 = allFields.get("996");
+    	if (list996 == null) {
+    		return result;
+    	}
+    	for (DataField dataField: list996) {
+    		StringBuilder currentSb = new StringBuilder();
+    		// 996 with '0' in subfield 'q'
+    		if (dataField.getSubfield('q') != null && dataField.getSubfields('q').equals("0")) {
+    			continue;
+    		}
+    		for (Subfield subfield: dataField.getSubfields()) {
+    			currentSb.append('$');
+    			currentSb.append(subfield.getCode());
+    			currentSb.append(subfield.getData());
+    		}
+    		result.add(currentSb.toString());
+    	}
     	return result;
     }
 

@@ -2,11 +2,11 @@ package cz.mzk.recordmanager.server.index;
 
 import static org.easymock.EasyMock.and;
 import static org.easymock.EasyMock.anyInt;
+import static org.easymock.EasyMock.anyObject;
 import static org.easymock.EasyMock.capture;
 import static org.easymock.EasyMock.expect;
 import static org.easymock.EasyMock.replay;
 import static org.easymock.EasyMock.reset;
-import static org.easymock.EasyMock.anyObject;
 import static org.easymock.EasyMock.verify;
 
 import java.text.DateFormat;
@@ -18,7 +18,6 @@ import java.util.Map;
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrInputDocument;
-import org.easymock.Capture;
 import org.easymock.EasyMock;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
@@ -34,6 +33,7 @@ import org.testng.annotations.Test;
 
 import cz.mzk.recordmanager.server.AbstractTest;
 import cz.mzk.recordmanager.server.DBUnitHelper;
+import cz.mzk.recordmanager.server.solr.SolrServerFactory;
 
 public class IndexRecordsToSolrJobTest extends AbstractTest {
 	
@@ -49,7 +49,7 @@ public class IndexRecordsToSolrJobTest extends AbstractTest {
 	
 	@Autowired
 	private SolrServerFactory solrServerFactory;
-	
+
 	@Autowired
 	private DBUnitHelper dbUnitHelper;
 	
@@ -66,10 +66,7 @@ public class IndexRecordsToSolrJobTest extends AbstractTest {
 		reset(solrServerFactory);
 		reset(mockedSolrServer);
 		expect(solrServerFactory.create(SOLR_URL)).andReturn(mockedSolrServer).anyTimes();
-		Capture<Collection<SolrInputDocument>> documents1 = EasyMock.newCapture();
-		//Capture<Collection<SolrInputDocument>> documents2 = EasyMock.newCapture();
-		expect(mockedSolrServer.add(and(capture(documents1), (Collection<SolrInputDocument>) anyObject(Collection.class)), anyInt())).andReturn(new UpdateResponse());
-		//expect(mockedSolrServer.add(and(capture(documents2), (Collection<SolrInputDocument>) anyObject(Collection.class)), anyInt())).andReturn(new UpdateResponse());
+		expect(mockedSolrServer.add(and(capture(EasyMock.newCapture()), (Collection<SolrInputDocument>) anyObject(Collection.class)), anyInt())).andReturn(new UpdateResponse());
 		replay(solrServerFactory, mockedSolrServer);
 		
 		Job job = jobRegistry.getJob("indexRecordsToSolrJob");

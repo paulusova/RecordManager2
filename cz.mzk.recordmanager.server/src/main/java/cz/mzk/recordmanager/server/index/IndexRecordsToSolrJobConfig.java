@@ -2,11 +2,14 @@ package cz.mzk.recordmanager.server.index;
 
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
 
 import javax.sql.DataSource;
 
 import org.apache.solr.common.SolrInputDocument;
+import org.hibernate.SessionFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.Job;
@@ -14,6 +17,7 @@ import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.batch.integration.async.AsyncItemProcessor;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.database.JdbcPagingItemReader;
 import org.springframework.batch.item.database.Order;
@@ -23,6 +27,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -30,6 +35,7 @@ import cz.mzk.recordmanager.server.jdbc.DedupRecordRowMapper;
 import cz.mzk.recordmanager.server.jdbc.StringValueRowMapper;
 import cz.mzk.recordmanager.server.model.DedupRecord;
 import cz.mzk.recordmanager.server.model.HarvestedRecord;
+import cz.mzk.recordmanager.server.springbatch.DelegatingHibernateProcessor;
 import cz.mzk.recordmanager.server.springbatch.JobFailureListener;
 import cz.mzk.recordmanager.server.util.Constants;
 
@@ -42,9 +48,13 @@ public class IndexRecordsToSolrJobConfig {
 
 	private static final String STRING_OVERRIDEN_BY_EXPRESSION = null;
 
+	private static final Integer INTEGER_OVERRIDEN_BY_EXPRESSION = null;
+
 	private static final int CHUNK_SIZE = 1000;
 
 	private static final int PAGE_SIZE = 5000;
+	
+	private static final int CONCURRENCY_LIMIT = 8;
 
 	@Autowired
     private JobBuilderFactory jobs;
@@ -57,30 +67,32 @@ public class IndexRecordsToSolrJobConfig {
 
 	@Autowired
 	private HarvestedRecordRowMapper harvestedRecordRowMapper;
-    
+
+	@Autowired
+	private SessionFactory sessionFactory;
+
 	@Bean
-    public Job indexAllRecordsToSolrJob(
-    		@Qualifier("indexRecordsToSolrJob:updateRecordsStep") Step updateRecordsStep,
-    		@Qualifier("indexRecordsToSolrJob:deleteOrphanedRecordsStep") Step deleteOrphanedRecordsStep,
-    		@Qualifier("indexLocalRecordsToSolrJob:deleteOrphanedHarvestedRecordsStep") Step deleteOrphanedHarvestedRecordsStep,
-    		@Qualifier("indexLocalRecordsToSolrJob:updateHarvestedRecordsStep") Step updateHarvestedRecordsStep) {
-        return jobs.get(Constants.JOB_ID_SOLR_INDEX_ALL_RECORDS)
+	public Job indexAllRecordsToSolrJob(
+			@Qualifier("indexRecordsToSolrJob:updateRecordsStep") Step updateRecordsStep,
+			@Qualifier("indexRecordsToSolrJob:deleteOrphanedRecordsStep") Step deleteOrphanedRecordsStep,
+			@Qualifier("indexLocalRecordsToSolrJob:deleteOrphanedHarvestedRecordsStep") Step deleteOrphanedHarvestedRecordsStep,
+			@Qualifier("indexLocalRecordsToSolrJob:updateHarvestedRecordsStep") Step updateHarvestedRecordsStep) {
+		return jobs.get(Constants.JOB_ID_SOLR_INDEX_ALL_RECORDS)
         		.validator(new IndexRecordsToSolrJobParametersValidator())
         		.listener(JobFailureListener.INSTANCE)
         		.flow(deleteOrphanedHarvestedRecordsStep)
-        		.next(updateHarvestedRecordsStep)
 				.next(updateRecordsStep)
 				.next(deleteOrphanedRecordsStep)
 				.end()
 				.build();
-    }
+	}
 	
-    @Bean
-    public Job indexRecordsToSolrJob(@Qualifier("indexRecordsToSolrJob:updateRecordsStep") Step updateRecordsStep,
-    		@Qualifier("indexRecordsToSolrJob:deleteOrphanedRecordsStep") Step deleteOrphanedRecordsStep) {
-        return jobs.get(Constants.JOB_ID_SOLR_INDEX)
-        		.validator(new IndexRecordsToSolrJobParametersValidator())
-        		.listener(JobFailureListener.INSTANCE)
+	@Bean
+	public Job indexRecordsToSolrJob(@Qualifier("indexRecordsToSolrJob:updateRecordsStep") Step updateRecordsStep,
+			@Qualifier("indexRecordsToSolrJob:deleteOrphanedRecordsStep") Step deleteOrphanedRecordsStep) {
+		return jobs.get(Constants.JOB_ID_SOLR_INDEX)
+				.validator(new IndexRecordsToSolrJobParametersValidator())
+				.listener(JobFailureListener.INSTANCE)
 				.flow(updateRecordsStep)
 				.next(deleteOrphanedRecordsStep)
 				.end()
@@ -96,34 +108,36 @@ public class IndexRecordsToSolrJobConfig {
 				.end()
 				.build();
     }
-    
+
     // dedup records
-    @Bean(name="indexRecordsToSolrJob:updateRecordsStep")
-    public Step updateRecordsStep() throws Exception {
+	@Bean(name="indexRecordsToSolrJob:updateRecordsStep")
+	public Step updateRecordsStep() throws Exception {
 		return steps.get("updateRecordsJobStep")
-            .<DedupRecord, SolrInputDocument> chunk(CHUNK_SIZE) //
-            .reader(updatedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
-            .processor(updatedRecordsProcessor()) //
-            .writer(updatedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
-            .build();
-    }
-    
-    @Bean(name="indexRecordsToSolrJob:deleteOrphanedRecordsStep")
-    public Step deleteOrphanedRecordsStep() throws Exception {
+			.<DedupRecord, Future<List<SolrInputDocument>>> chunk(CHUNK_SIZE) //
+			.reader(updatedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
+			.processor(asyncUpdatedRecordsProcessor()) //
+			.writer(updatedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
+			.build();
+	}
+
+	@Bean(name="indexRecordsToSolrJob:deleteOrphanedRecordsStep")
+	public Step deleteOrphanedRecordsStep() throws Exception {
 		return steps.get("deleteOrphanedRecordsJobStep")
-            .<String, String> chunk(20) //
-            .reader(orphanedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
-            .writer(orphanedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
-            .build();
-    }
-	
-    @Bean(name="indexRecordsToSolrJob:updatedRecordsReader")
+			.<String, String> chunk(20) //
+			.reader(orphanedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
+			.writer(orphanedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
+			.build();
+	}
+
+	@Bean(name = "indexRecordsToSolrJob:updatedRecordsReader")
 	@StepScope
-    public ItemReader<DedupRecord> updatedRecordsReader(@Value("#{jobParameters[" + Constants.JOB_PARAM_FROM_DATE  + "]}") Date from,
-    		@Value("#{jobParameters[" + Constants.JOB_PARAM_UNTIL_DATE + "]}") Date to) throws Exception {
-    	if (from != null && to == null) {
-    		to = new Date();
-    	}
+	public ItemReader<DedupRecord> updatedRecordsReader(
+			@Value("#{jobParameters[" + Constants.JOB_PARAM_FROM_DATE + "]}") Date from,
+			@Value("#{jobParameters[" + Constants.JOB_PARAM_UNTIL_DATE + "]}") Date to)
+			throws Exception {
+		if (from != null && to == null) {
+			to = new Date();
+		}
 		JdbcPagingItemReader<DedupRecord> reader = new JdbcPagingItemReader<DedupRecord>();
 		SqlPagingQueryProviderFactoryBean pqpf = new SqlPagingQueryProviderFactoryBean();
 		pqpf.setDataSource(dataSource);
@@ -133,32 +147,43 @@ public class IndexRecordsToSolrJobConfig {
 			pqpf.setWhereClause("WHERE last_update BETWEEN :from AND :to");
 		}
 		pqpf.setSortKey("dedup_record_id");
-		reader.setRowMapper(new DedupRecordRowMapper());
+		reader.setRowMapper(new DedupRecordRowMapper("dedup_record_id"));
 		reader.setPageSize(PAGE_SIZE);
-    	reader.setQueryProvider(pqpf.getObject());
-    	reader.setDataSource(dataSource);
-    	if (from != null && to != null) {
-    		Map<String, Object> parameterValues = new HashMap<String, Object>();
-    		parameterValues.put("from", from);
-    		parameterValues.put("to", to);
-    		reader.setParameterValues(parameterValues);
-    	}
-    	reader.afterPropertiesSet();
-    	return reader;
-    }
-	
+		reader.setQueryProvider(pqpf.getObject());
+		reader.setDataSource(dataSource);
+		if (from != null && to != null) {
+			Map<String, Object> parameterValues = new HashMap<String, Object>();
+			parameterValues.put("from", from);
+			parameterValues.put("to", to);
+			reader.setParameterValues(parameterValues);
+		}
+		reader.afterPropertiesSet();
+		return reader;
+	}
+
     @Bean(name="indexRecordsToSolrJob:updatedRecordsProcessor")
 	@StepScope
 	public SolrRecordProcessor updatedRecordsProcessor() {
 		return new SolrRecordProcessor();
 	}
-    
+
+	@Bean(name = "indexRecordsToSolrJob:asyncUpdatedRecordsProcessor")
+	@StepScope
+	public AsyncItemProcessor<DedupRecord, List<SolrInputDocument>> asyncUpdatedRecordsProcessor() {
+		AsyncItemProcessor<DedupRecord, List<SolrInputDocument>> processor = new AsyncItemProcessor<>();
+		processor.setDelegate(new DelegatingHibernateProcessor<>(sessionFactory, updatedRecordsProcessor()));
+		SimpleAsyncTaskExecutor taskExecutor = new SimpleAsyncTaskExecutor("solrIndexer");
+		taskExecutor.setConcurrencyLimit(CONCURRENCY_LIMIT);
+		processor.setTaskExecutor(taskExecutor);
+		return processor;
+	}
+
     @Bean(name="indexRecordsToSolrJob:updatedRecordsWriter")
     @StepScope
     public SolrIndexWriter updatedRecordsWriter(@Value("#{jobParameters[" + Constants.JOB_PARAM_SOLR_URL + "]}") String solrUrl) {
     	return new SolrIndexWriter(solrUrl);
     }
-    
+
     @Bean(name="indexRecordsToSolrJob:orphanedRecordsReader")
 	@StepScope
     public ItemReader<String> orphanedRecordsReader(@Value("#{jobParameters[" + Constants.JOB_PARAM_FROM_DATE  + "]}") Date from,
@@ -188,13 +213,13 @@ public class IndexRecordsToSolrJobConfig {
     	reader.afterPropertiesSet();
     	return reader;
     }
-    
+
     @Bean(name="indexRecordsToSolrJob:orphanedRecordsWriter")
     @StepScope
     public OrphanedRecordsWriter orphanedRecordsWriter(@Value("#{jobParameters[" + Constants.JOB_PARAM_SOLR_URL + "]}") String solrUrl) {
     	return new OrphanedRecordsWriter(solrUrl);
     }
-    
+
     // local records
     @Bean(name="indexLocalRecordsToSolrJob:deleteOrphanedHarvestedRecordsStep") 
     public Step deleteOrphanedHarvestedRecordsStep() throws Exception {
@@ -225,7 +250,7 @@ public class IndexRecordsToSolrJobConfig {
 		pqpf.setSortKeys(ImmutableMap.of("import_conf_id",
 				Order.ASCENDING, "record_id", Order.ASCENDING));
 		reader.setRowMapper(new StringValueRowMapper());
-		reader.setPageSize(20);
+		reader.setPageSize(PAGE_SIZE);
     	reader.setQueryProvider(pqpf.getObject());
     	reader.setDataSource(dataSource);
     	if (from != null && to != null) {
@@ -237,16 +262,16 @@ public class IndexRecordsToSolrJobConfig {
     	reader.afterPropertiesSet();
     	return reader;
     }
-    
-    @Bean(name="indexLocalRecordsToSolrJob:updateHarvestedRecordsStep")
-    public Step updateHarvestedRecordsStep() throws Exception {
+
+	@Bean(name="indexLocalRecordsToSolrJob:updateHarvestedRecordsStep")
+	public Step updateHarvestedRecordsStep() throws Exception {
 		return steps.get("updateHarvestedRecordsStep")
-            .<HarvestedRecord, SolrInputDocument> chunk(CHUNK_SIZE) //
-            .reader(updatedHarvestedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
-            .processor(updatedHarvestedRecordsProcessor()) //
-            .writer(updatedHarvestedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
-            .build();
-    }
+			.<HarvestedRecord, Future<List<SolrInputDocument>>> chunk(CHUNK_SIZE) //
+			.reader(updatedHarvestedRecordsReader(DATE_OVERRIDEN_BY_EXPRESSION, DATE_OVERRIDEN_BY_EXPRESSION)) //
+			.processor(asyncUpdatedHarvestedRecordsProcessor(INTEGER_OVERRIDEN_BY_EXPRESSION)) //
+			.writer(updatedHarvestedRecordsWriter(STRING_OVERRIDEN_BY_EXPRESSION)) //
+			.build();
+	}
 	
 	@Bean(name = "indexLocalRecordsToSolrJob:updatedHarvestedRecordsReader")
 	@StepScope
@@ -286,11 +311,23 @@ public class IndexRecordsToSolrJobConfig {
 	public SolrHarvestedRecordProcessor updatedHarvestedRecordsProcessor() {
 		return new SolrHarvestedRecordProcessor();
 	}
-	
-    @Bean(name="indexLocalRecordsToSolrJob:updatedHarvestedRecordsWriter")
-    @StepScope
-    public SolrIndexWriter updatedHarvestedRecordsWriter(@Value("#{jobParameters[" + Constants.JOB_PARAM_SOLR_URL + "]}") String solrUrl) {
-    	return new SolrIndexWriter(solrUrl);
-    }
-    
+
+	@Bean(name = "indexLocalRecordsToSolrJob:asyncUpdatedHarvestedRecordsReader")
+	@StepScope
+	public AsyncItemProcessor<HarvestedRecord, List<SolrInputDocument>> asyncUpdatedHarvestedRecordsProcessor(
+			@Value("#{jobParameters[" + Constants.JOB_PARAM_NUMBER_OF_INDEXING_THREADS + "]}") Integer indexingThreads) {
+		AsyncItemProcessor<HarvestedRecord, List<SolrInputDocument>> processor = new AsyncItemProcessor<>();
+		processor.setDelegate(new DelegatingHibernateProcessor<>(sessionFactory, updatedHarvestedRecordsProcessor()));
+		SimpleAsyncTaskExecutor taskExecutor = new SimpleAsyncTaskExecutor("solrIndexer"); 
+		taskExecutor.setConcurrencyLimit((indexingThreads != null) ? indexingThreads : CONCURRENCY_LIMIT);
+		processor.setTaskExecutor(taskExecutor);
+		return processor;
+	}
+
+	@Bean(name="indexLocalRecordsToSolrJob:updatedHarvestedRecordsWriter")
+	@StepScope
+	public SolrIndexWriter updatedHarvestedRecordsWriter(@Value("#{jobParameters[" + Constants.JOB_PARAM_SOLR_URL + "]}") String solrUrl) {
+		return new SolrIndexWriter(solrUrl);
+	}
+
 }

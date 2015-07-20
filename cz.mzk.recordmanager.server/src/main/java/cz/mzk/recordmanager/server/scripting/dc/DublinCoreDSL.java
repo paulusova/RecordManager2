@@ -6,29 +6,28 @@ import java.util.Map;
 
 import cz.mzk.recordmanager.server.dc.DublinCoreRecord;
 import cz.mzk.recordmanager.server.metadata.MetadataDublinCoreRecord;
+import cz.mzk.recordmanager.server.scripting.BaseDSL;
 import cz.mzk.recordmanager.server.scripting.Mapping;
 import cz.mzk.recordmanager.server.scripting.MappingResolver;
 import cz.mzk.recordmanager.server.scripting.function.RecordFunction;
 
-public class DublinCoreDSL {
-	
+public class DublinCoreDSL extends BaseDSL {
+
 	private final DublinCoreRecord record;
 	private MetadataDublinCoreRecord dcMetadataRecord;
 	
-	private final MappingResolver propertyResolver;
 	
 	private final Map<String, RecordFunction<DublinCoreRecord>> functions;
 
 	public DublinCoreDSL(DublinCoreRecord record,
 			MappingResolver propertyResolver,
 			Map<String, RecordFunction<DublinCoreRecord>> functions) {
-		super();
+		super(propertyResolver);
 		this.record = record;
-		this.propertyResolver = propertyResolver;
 		this.functions = functions;
 		this.dcMetadataRecord = new MetadataDublinCoreRecord(record);
 	}
-	
+
 	public String getFirstTitle() {
 		return record.getFirstTitle();
 	}
@@ -88,16 +87,6 @@ public class DublinCoreDSL {
 		return getAllFields();		
 	}
 	
-	
-	public String translate(String file, String input, String defaultValue)
-			throws IOException {
-		Mapping mapping = propertyResolver.resolve(file);
-		String result = (String) mapping.get(input);
-		if (result == null) {
-			result = defaultValue;
-		}
-		return result;
-	}
 	
 	public Object methodMissing(String methodName, Object args) {
 		RecordFunction<DublinCoreRecord> func = functions.get(methodName);
