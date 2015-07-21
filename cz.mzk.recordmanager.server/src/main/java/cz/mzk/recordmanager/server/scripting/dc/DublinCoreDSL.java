@@ -34,9 +34,15 @@ public class DublinCoreDSL extends BaseDSL {
 	
 	public List<String> getOtherTitles() {
 		List<String> titles = record.getTitles();
+		System.out.print("--titles---------------" + titles.toString());
 		if (!titles.isEmpty()) {
 			titles.remove(0); //removes first title which goes to different field
 		}
+		if (titles.isEmpty()) {
+			System.out.println(" >>>>>>>>>>>>>>> other titles empty");
+			return null;
+		}
+		System.out.println(" >>>>>>>>>>>>>>> " + titles.toString());
 		return titles;
 	}
 	
@@ -47,12 +53,15 @@ public class DublinCoreDSL extends BaseDSL {
 	public List<String> getOtherCreators() {
 		List<String> creators = record.getCreators();
 		List<String> contributors = record.getContributors();
-		if (!creators.isEmpty()) {
+		if (!creators.isEmpty() && creators.size()>1) {
 			creators.remove(0); //removes first creator who goes to different field
 		}
 		if (!contributors.isEmpty()) {
 			creators.addAll(contributors); //adds all contributors to other creators
 		} 
+		if (creators.isEmpty()) {
+			return null;
+		}
 		return creators;
 	}
 	
@@ -85,6 +94,21 @@ public class DublinCoreDSL extends BaseDSL {
 	public String getFullrecord() {
 		//TODO <MJ.> decide how should export work
 		return getAllFields();		
+	}
+	
+	public String getDescriptionText() {
+		String result="";
+		List<String> descriptions = record.getDescriptions();
+		
+		if (descriptions == null) {
+			return null;
+		} else {	
+			for (String s: descriptions) {
+				result += s;
+			}
+		}
+		return result;
+		
 	}
 	
 	
